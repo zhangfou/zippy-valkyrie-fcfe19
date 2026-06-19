@@ -1,4 +1,4 @@
-const RP_HUB_CACHE = 'rp-hub-shell-v1';
+const RP_HUB_CACHE = 'rp-hub-shell-v2';
 
 const LOCAL_ASSETS = [
   './',
@@ -9,6 +9,10 @@ const LOCAL_ASSETS = [
   './assets/js/card-utils.js',
   './assets/js/ui-select.js',
   './assets/js/app.js',
+  './assets/vendor/vue.global.prod.js',
+  './assets/vendor/marked.min.js',
+  './assets/vendor/purify.min.js',
+  './assets/vendor/Sortable.min.js',
   './assets/icons/icon.svg'
 ];
 
