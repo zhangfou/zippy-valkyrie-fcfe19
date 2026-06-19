@@ -4156,6 +4156,112 @@ ${content}
             return !isConversationBusy.value;
         };
 
+        const TAVERN_OPTIONS_BLOCK_RE = /<tavern-options\b([^>]*)>([\s\S]*?)<\/tavern-options>/gi;
+        const TAVERN_OPTION_RE = /<option\b([^>]*)>([\s\S]*?)<\/option>/gi;
+        const TAVERN_OPTION_TRIGGER_RE = /酒馆|选项|选择|行动|分支|tavern|choice|option/i;
+
+        const getXmlAttribute = (attrs, name) => {
+            const match = String(attrs || '').match(new RegExp(`${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i'));
+            return match ? (match[1] || match[2] || match[3] || '').trim() : '';
+        };
+
+        const stripHtmlTags = (text) => String(text || '').replace(/<[^>]+>/g, '').trim();
+
+        const parseTavernOptionsFromContent = (content) => {
+            const text = String(content || '');
+            const blocks = [];
+            const cleaned = text.replace(TAVERN_OPTIONS_BLOCK_RE, (full, attrs, inner) => {
+                const options = [];
+                String(inner || '').replace(TAVERN_OPTION_RE, (optionFull, optionAttrs, optionInner) => {
+                    const label = getXmlAttribute(optionAttrs, 'label') || getXmlAttribute(optionAttrs, 'text') || stripHtmlTags(optionInner);
+                    const value = getXmlAttribute(optionAttrs, 'value') || stripHtmlTags(optionInner) || label;
+                    if (label && value) {
+                        options.push({
+                            id: generateUUID(),
+                            label: label.slice(0, 80),
+                            value: value.slice(0, 500)
+                        });
+                    }
+                    return '';
+                });
+
+                if (options.length > 0) {
+                    blocks.push({
+                        title: getXmlAttribute(attrs, 'title') || '你要怎么做？',
+                        options
+                    });
+                }
+                return '';
+            }).replace(/\n{3,}/g, '\n\n').trim();
+
+            return { cleaned, blocks };
+        };
+
+        const hydrateTavernOptionsFromMessage = (message) => {
+            if (!message || message.role !== 'assistant' || typeof message.content !== 'string') return;
+            const parsed = parseTavernOptionsFromContent(message.content);
+            if (parsed.blocks.length === 0) return;
+            message.content = parsed.cleaned;
+            message.tavernOptions = parsed.blocks;
+            message.skipReveal = true;
+        };
+
+        const normalizeLoadedTavernOptions = (message) => {
+            if (!message || message.role !== 'assistant') return message;
+            if (Array.isArray(message.tavernOptions)) {
+                message.tavernOptions = message.tavernOptions
+                    .map(block => ({
+                        title: String(block?.title || '你要怎么做？'),
+                        options: Array.isArray(block?.options)
+                            ? block.options.map(option => ({
+                                id: option?.id || generateUUID(),
+                                label: String(option?.label || option?.value || '').slice(0, 80),
+                                value: String(option?.value || option?.label || '').slice(0, 500)
+                            })).filter(option => option.label && option.value)
+                            : []
+                    }))
+                    .filter(block => block.options.length > 0);
+            }
+            hydrateTavernOptionsFromMessage(message);
+            return message;
+        };
+
+        const shouldInjectTavernOptionsPrompt = (entries = []) => entries.some(entry => (
+            TAVERN_OPTION_TRIGGER_RE.test(`${entry?.comment || ''}\n${entry?.content || ''}`)
+        ));
+
+        const buildTavernOptionsSystemPrompt = () => [
+            '[Tavern Options UI]',
+            'If the active world info, scene rule, or user request asks for NPC-after-speech choices, append one tavern options block at the very end of the assistant message.',
+            'Use exactly this XML-like format and do not wrap it in Markdown code fences:',
+            '<tavern-options title="你要怎么做？">',
+            '<option label="向酒保打听传闻">向酒保打听传闻</option>',
+            '<option label="查看委托板">查看委托板</option>',
+            '<option label="离开酒馆">离开酒馆</option>',
+            '</tavern-options>',
+            'The visible story text should still be normal roleplay prose. Keep 2-4 options, make them concrete, and follow the active world info requirements for what choices are allowed.'
+        ].join('\n');
+
+        const sendTavernOption = async (option) => {
+            if (!option || isConversationBusy.value) return;
+            const content = String(option.value || option.label || '').trim();
+            if (!content) return;
+
+            const startTime = Date.now();
+            chatHistory.value.push({
+                role: 'user',
+                name: user.name,
+                content,
+                shouldAnimate: true,
+                skipReveal: true,
+                isSelf: true,
+                avatar: user.avatar,
+                fromTavernOption: true
+            });
+            await nextTick();
+            await generateResponse(startTime);
+        };
+
         const sendMessage = async () => {
             if (!userInput.value.trim() || isConversationBusy.value) return;
 
@@ -5147,6 +5253,9 @@ ${content}
 
             const activeToolPrompt = buildActiveToolSystemPrompt();
             if (activeToolPrompt) systemPromptParts.push(activeToolPrompt);
+            if (shouldInjectTavernOptionsPrompt(budgetedEntries)) {
+                systemPromptParts.push(buildTavernOptionsSystemPrompt());
+            }
 
             const systemPrompt = systemPromptParts.join('\n\n');
             const systemWorldInfo = [
@@ -5892,6 +6001,7 @@ ${content}
                         }
 
                         if (assistantMessage) {
+                            hydrateTavernOptionsFromMessage(assistantMessage);
                             generatedAssistantMessageId = assistantMessage.id;
                             console.groupCollapsed('📬 AI 响应接收完毕');
                             console.log('AI返回的完整内容:', assistantMessage.content);
@@ -9231,7 +9341,7 @@ image###生成的提示词###
                 if (msg.role === 'assistant' && msg.isSummaryOpen === undefined && hasThinkingOrTools(msg)) {
                     msg.isSummaryOpen = false;
                 }
-                return msg;
+                return normalizeLoadedTavernOptions(msg);
             });
 
         const selectCharacter = async (index, isNewImport = false) => {
@@ -10824,7 +10934,7 @@ image###生成的提示词###
             },
             toggleMobileMenu, closeMobileMenu,
             scrollToPreviousMessage, scrollToNextMessage,
-            fetchModels, selectModel, sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
+            fetchModels, selectModel, sendMessage, sendTavernOption, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
             handleConfirm, handleCancel, // Export handlers
             manualSave,
             copyMessage, deleteMessage, regenerateMessage, printAIRequestLogs,

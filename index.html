@@ -5,7 +5,12 @@
     <meta charset="UTF-8">
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
+    <meta name="theme-color" content="#eff6ff">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="Roleplay Hub">
     <title>Roleplay Hub</title>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./assets/icons/icon.svg" type="image/svg+xml">
     <!-- GitHub Pages rebuild marker for CSS-only animation update. -->
     <!-- <link rel="icon" href="logo.jpg" type="image/jpeg"> -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -773,6 +778,23 @@
                                                     </div>
                                                 </template>
                                             </template>
+
+                                            <div v-if="msg.role === 'assistant' && msg.tavernOptions && msg.tavernOptions.length && !(index === chatHistory.length - 1 && (isGenerating || isRemoteGenerating))"
+                                                class="tavern-options-wrapper">
+                                                <div v-for="block in msg.tavernOptions" :key="block.title + '-' + block.options.length"
+                                                    class="tavern-options-card">
+                                                    <div class="tavern-options-title">{{ block.title || '你要怎么做？' }}</div>
+                                                    <div class="tavern-options-grid">
+                                                        <button v-for="option in block.options" :key="option.id || option.label"
+                                                            type="button"
+                                                            class="tavern-option-button"
+                                                            :disabled="isConversationBusy"
+                                                            @click="sendTavernOption(option)">
+                                                            {{ option.label }}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
 
                                             <!-- Sys Instruction Part -->
                                             <div v-if="parseCot(msg.content).sys"
@@ -4841,6 +4863,15 @@
         document.write('<script src="assets/js/card-utils.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/ui-select.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/app.js?v=' + new Date().getTime() + '"><\/script>');
+    </script>
+    <script>
+        if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').catch(error => {
+                    console.warn('Service worker registration failed:', error);
+                });
+            });
+        }
     </script>
 </body>
 

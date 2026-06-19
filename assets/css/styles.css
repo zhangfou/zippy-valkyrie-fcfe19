@@ -2088,6 +2088,56 @@ opacity: 0;
 .ui-template-message-block + .markdown-body {
     margin-top: 0;
 }
+.tavern-options-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    width: 100%;
+    margin-top: 0.85rem;
+}
+.tavern-options-card {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 0.75rem;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.9));
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+.tavern-options-title {
+    margin-bottom: 0.55rem;
+    color: #475569;
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+}
+.tavern-options-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 0.5rem;
+}
+.tavern-option-button {
+    min-height: 2.5rem;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid rgba(99, 102, 241, 0.18);
+    border-radius: 0.65rem;
+    color: #334155;
+    background: rgba(255, 255, 255, 0.82);
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1.35;
+    text-align: left;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+.tavern-option-button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    border-color: rgba(79, 70, 229, 0.36);
+    background: rgba(238, 242, 255, 0.92);
+    box-shadow: 0 8px 18px rgba(79, 70, 229, 0.12);
+}
+.tavern-option-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
 .ui-template-pending-card {
     position: relative;
     display: flex;
