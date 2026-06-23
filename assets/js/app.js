@@ -87,6 +87,7 @@ createApp({
 
         // --- Default API Configuration ---
         const DEFAULT_API_PROVIDER_ID = 'sta1n';
+        const STEPFUN_DEFAULT_CHAT_MODEL = 'step-1-8k';
         const DEFAULT_API_CONFIG = {
             apiUrl: 'https://cdn.sta1n.cn/v1',
             apiKey: '',
@@ -120,6 +121,22 @@ createApp({
                 name: 'SiliconFlow',
                 apiUrl: 'https://api.siliconflow.cn/v1',
                 icon: 'https://siliconflow.cn/favicon.ico'
+            },
+            {
+                id: 'stepfun',
+                name: '阶跃星辰 StepFun',
+                apiUrl: 'https://api.stepfun.com/v1',
+                icon: '',
+                defaultModels: {
+                    model: STEPFUN_DEFAULT_CHAT_MODEL,
+                    qualityModel: STEPFUN_DEFAULT_CHAT_MODEL,
+                    balancedModel: STEPFUN_DEFAULT_CHAT_MODEL,
+                    fastModel: STEPFUN_DEFAULT_CHAT_MODEL
+                },
+                fallbackModels: [
+                    { id: STEPFUN_DEFAULT_CHAT_MODEL, object: 'model', owned_by: 'stepfun' },
+                    { id: 'step-1v-8k', object: 'model', owned_by: 'stepfun' }
+                ]
             }
         ];
 
@@ -315,7 +332,7 @@ createApp({
         const userInput = ref('');
         const modelSearchQuery = ref('');
         const activeModelTag = ref('all');
-        const popularModelFamilies = ['claude', 'gemini', 'deepseek', 'llama', 'glm', 'minimax', 'moonshot', 'grok'];
+        const popularModelFamilies = ['claude', 'gemini', 'deepseek', 'step', 'llama', 'glm', 'minimax', 'moonshot', 'grok'];
         const characterSearchQuery = ref('');
         const availableModels = ref([]);
         const toasts = ref([]);
@@ -533,6 +550,7 @@ createApp({
             apiKey: DEFAULT_API_CONFIG.apiKey,
             apiProviderId: DEFAULT_API_PROVIDER_ID,
             apiProviderKeys: {},
+            apiProviderModels: {},
             customApiUrl: '',
             customApiUrl2: '',
             model: DEFAULT_API_CONFIG.qualityModel,
@@ -591,6 +609,67 @@ createApp({
             const currentUrl = normalizeApiProviderUrl(url);
             return apiProviderOptions.find(provider => normalizeApiProviderUrl(provider.apiUrl) === currentUrl);
         };
+        const modelSettingKeys = ['model', 'qualityModel', 'balancedModel', 'fastModel'];
+        const normalizeModelItem = (model) => {
+            if (typeof model === 'string') return { id: model };
+            if (model && typeof model === 'object' && typeof model.id === 'string') return model;
+            return null;
+        };
+        const mergeModelLists = (primaryModels = [], fallbackModels = []) => {
+            const merged = [];
+            const seen = new Set();
+            [...primaryModels, ...fallbackModels].forEach(model => {
+                const normalized = normalizeModelItem(model);
+                if (!normalized || seen.has(normalized.id)) return;
+                seen.add(normalized.id);
+                merged.push(normalized);
+            });
+            return merged;
+        };
+        const getProviderFallbackModels = (provider = selectedApiProvider.value) => (
+            Array.isArray(provider?.fallbackModels)
+                ? provider.fallbackModels.map(normalizeModelItem).filter(Boolean)
+                : []
+        );
+        const seedAvailableModelsForProvider = (provider = selectedApiProvider.value) => {
+            const fallbackModels = getProviderFallbackModels(provider);
+            availableModels.value = fallbackModels.length ? mergeModelLists([], fallbackModels) : [];
+        };
+        const normalizeApiProviderModelSettings = () => {
+            if (!settings.apiProviderModels || typeof settings.apiProviderModels !== 'object' || Array.isArray(settings.apiProviderModels)) {
+                settings.apiProviderModels = {};
+            }
+            [...apiProviderOptions, ...customApiProviderOptions].forEach(provider => {
+                if (!settings.apiProviderModels[provider.id] || typeof settings.apiProviderModels[provider.id] !== 'object' || Array.isArray(settings.apiProviderModels[provider.id])) {
+                    settings.apiProviderModels[provider.id] = {};
+                }
+            });
+        };
+        const syncCurrentModelsToProvider = () => {
+            const providerId = settings.apiProviderId || selectedApiProvider.value.id || DEFAULT_API_PROVIDER_ID;
+            normalizeApiProviderModelSettings();
+            const providerModels = settings.apiProviderModels[providerId];
+            modelSettingKeys.forEach(key => {
+                providerModels[key] = settings[key] || '';
+            });
+        };
+        const applyProviderModelSettings = (provider, options = {}) => {
+            if (!provider) return;
+            normalizeApiProviderModelSettings();
+            const savedModels = settings.apiProviderModels[provider.id] || {};
+            const defaultModels = provider.defaultModels || {};
+            const nextModels = { ...defaultModels, ...savedModels };
+            const fallbackModel = nextModels.model || nextModels.qualityModel || nextModels.balancedModel || nextModels.fastModel || '';
+            modelSettingKeys.forEach(key => {
+                const value = nextModels[key] || (key === 'model' ? fallbackModel : '');
+                if (options.force || !settings[key]) {
+                    settings[key] = value || '';
+                }
+            });
+            if ((options.force || !settings.model) && fallbackModel) {
+                settings.model = fallbackModel;
+            }
+        };
         const syncCurrentApiKeyToProvider = () => {
             const providerId = settings.apiProviderId || selectedApiProvider.value.id || DEFAULT_API_PROVIDER_ID;
             if (!settings.apiProviderKeys || typeof settings.apiProviderKeys !== 'object' || Array.isArray(settings.apiProviderKeys)) {
@@ -605,6 +684,7 @@ createApp({
             if (!settings.apiProviderKeys || typeof settings.apiProviderKeys !== 'object' || Array.isArray(settings.apiProviderKeys)) {
                 settings.apiProviderKeys = {};
             }
+            normalizeApiProviderModelSettings();
             [...apiProviderOptions, ...customApiProviderOptions].forEach(provider => {
                 if (typeof settings.apiProviderKeys[provider.id] !== 'string') {
                     settings.apiProviderKeys[provider.id] = '';
@@ -631,6 +711,8 @@ createApp({
                 settings.apiProviderKeys[settings.apiProviderId] = settings.apiKey;
             }
             settings.apiKey = settings.apiProviderKeys[settings.apiProviderId] || '';
+            applyProviderModelSettings(provider, { force: false });
+            if (!availableModels.value.length) seedAvailableModelsForProvider(provider);
         };
         const selectedApiProvider = computed(() => {
             const customProvider = customApiProviderOptions.find(provider => (
@@ -644,13 +726,19 @@ createApp({
         const isCustomApiProvider = computed(() => isCustomApiProviderId(selectedApiProvider.value.id));
         const selectApiProvider = (provider) => {
             syncCurrentApiKeyToProvider();
+            syncCurrentModelsToProvider();
             selectedApiProviderId.value = provider.id;
             settings.apiProviderId = provider.id;
             settings.apiUrl = isCustomApiProviderId(provider.id)
                 ? settings[getCustomApiUrlKey(provider.id)] || ''
                 : provider.apiUrl;
             settings.apiKey = settings.apiProviderKeys[provider.id] || '';
+            applyProviderModelSettings(provider, { force: true });
+            seedAvailableModelsForProvider(provider);
             showApiProviderSelector.value = false;
+            if (settings.autoFetchModels && settings.apiKey) {
+                fetchModels();
+            }
         };
         normalizeApiProviderSettings();
 
@@ -668,6 +756,10 @@ createApp({
             if (isCustomApiProviderId(settings.apiProviderId)) {
                 settings[getCustomApiUrlKey(settings.apiProviderId)] = newUrl || '';
             }
+        });
+
+        watch(() => [settings.model, settings.qualityModel, settings.balancedModel, settings.fastModel], () => {
+            syncCurrentModelsToProvider();
         });
 
         const syncSettingsToGenerator = () => {
@@ -3982,10 +4074,16 @@ ${content}
                 });
                 if (!response.ok) throw new Error('Failed to fetch models');
                 const data = await response.json();
-                availableModels.value = data.data || [];
+                availableModels.value = mergeModelLists(data.data || [], getProviderFallbackModels());
                 if (isManual) showToast(`成功获取 ${availableModels.value.length} 个模型`, 'success');
             } catch (error) {
                 console.error(error);
+                const fallbackModels = getProviderFallbackModels();
+                if (fallbackModels.length) {
+                    availableModels.value = fallbackModels;
+                    if (isManual) showToast('获取模型失败，已加载内置兼容模型: ' + error.message, 'warning');
+                    return;
+                }
                 showToast('获取模型失败: ' + error.message, 'error');
             }
         };

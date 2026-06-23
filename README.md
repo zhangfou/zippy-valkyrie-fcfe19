@@ -34,6 +34,18 @@ Roleplay Hub 致力于提供流畅、私密且功能强大的本地化AI Rolepla
 4. 在**角色管理**界面，导入您的角色卡文件（或点击新建角色并手动填写设定）。
 5. 回到对话界面，开始属于您的 Roleplay 旅程
 
+### 3. 阶跃星辰 StepFun / StepFunMCP 兼容
+
+本项目已内置“阶跃星辰 StepFun”API 提供商预设，可兼容 [weidafeng/StepFunMCP](https://github.com/weidafeng/StepFunMCP) 所使用的 StepFun OpenAI 风格接口。
+
+1. 打开**设置** → **API 连接与服务**。
+2. 在 **API 提供商**中选择“阶跃星辰 StepFun”。
+3. 填入您的 StepFun API Key。
+4. 默认接口地址为 `https://api.stepfun.com/v1`，默认聊天模型为 `step-1-8k`。
+5. 点击“获取模型”可从 StepFun `/v1/models` 拉取模型；如果拉取失败，应用会保留内置兼容模型作为兜底。
+
+说明：StepFunMCP 是 Python MCP server，浏览器无法直接运行 MCP stdio 服务。本项目的兼容方式是直接调用同一套 StepFun HTTP API，因此适用于聊天模型接入；StepFunMCP 的本地文件输出类工具能力仍需要在支持 MCP 的客户端中使用。
+
 ---
 
 ## 目录结构 (Directory Structure)
