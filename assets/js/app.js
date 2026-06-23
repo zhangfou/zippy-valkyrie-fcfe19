@@ -87,7 +87,7 @@ createApp({
 
         // --- Default API Configuration ---
         const DEFAULT_API_PROVIDER_ID = 'sta1n';
-        const STEPFUN_DEFAULT_CHAT_MODEL = 'step-1-8k';
+        const STEPFUN_STEP_PLAN_DEFAULT_MODEL = 'step-3.7-flash';
         const DEFAULT_API_CONFIG = {
             apiUrl: 'https://cdn.sta1n.cn/v1',
             apiKey: '',
@@ -124,18 +124,20 @@ createApp({
             },
             {
                 id: 'stepfun',
-                name: '阶跃星辰 StepFun',
-                apiUrl: 'https://api.stepfun.com/v1',
+                name: '阶跃星辰 Step Plan',
+                apiUrl: 'https://api.stepfun.com/step_plan/v1',
                 icon: '',
                 defaultModels: {
-                    model: STEPFUN_DEFAULT_CHAT_MODEL,
-                    qualityModel: STEPFUN_DEFAULT_CHAT_MODEL,
-                    balancedModel: STEPFUN_DEFAULT_CHAT_MODEL,
-                    fastModel: STEPFUN_DEFAULT_CHAT_MODEL
+                    model: STEPFUN_STEP_PLAN_DEFAULT_MODEL,
+                    qualityModel: STEPFUN_STEP_PLAN_DEFAULT_MODEL,
+                    balancedModel: 'step-3.5-flash-2603',
+                    fastModel: 'step-3.5-flash'
                 },
                 fallbackModels: [
-                    { id: STEPFUN_DEFAULT_CHAT_MODEL, object: 'model', owned_by: 'stepfun' },
-                    { id: 'step-1v-8k', object: 'model', owned_by: 'stepfun' }
+                    { id: STEPFUN_STEP_PLAN_DEFAULT_MODEL, object: 'model', owned_by: 'stepfun' },
+                    { id: 'step-3.5-flash-2603', object: 'model', owned_by: 'stepfun' },
+                    { id: 'step-3.5-flash', object: 'model', owned_by: 'stepfun' },
+                    { id: 'step-router-v1', object: 'model', owned_by: 'stepfun' }
                 ]
             }
         ];
@@ -656,7 +658,12 @@ createApp({
         const applyProviderModelSettings = (provider, options = {}) => {
             if (!provider) return;
             normalizeApiProviderModelSettings();
-            const savedModels = settings.apiProviderModels[provider.id] || {};
+            const savedModels = { ...(settings.apiProviderModels[provider.id] || {}) };
+            if (provider.id === 'stepfun') {
+                modelSettingKeys.forEach(key => {
+                    if (/^step-1(?:$|-|v)/.test(savedModels[key] || '')) delete savedModels[key];
+                });
+            }
             const defaultModels = provider.defaultModels || {};
             const nextModels = { ...defaultModels, ...savedModels };
             const fallbackModel = nextModels.model || nextModels.qualityModel || nextModels.balancedModel || nextModels.fastModel || '';
