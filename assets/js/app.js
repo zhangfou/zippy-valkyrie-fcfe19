@@ -84,6 +84,8 @@ createApp({
         const systemWorldInfoNames = ['自动生图'];
 
         const IMAGE_GEN_BASE_URL = 'https://nai.sta1n.cn';
+        const STEPFUN_STEP_PLAN_BASE_URL = 'https://api.stepfun.com/step_plan/v1';
+        const STEPFUN_IMAGE_MODEL = 'step-image-edit-2';
 
         // --- Default API Configuration ---
         const DEFAULT_API_PROVIDER_ID = 'sta1n';
@@ -203,6 +205,11 @@ createApp({
             quotaLoading.value = true;
             quotaError.value = false;
             try {
+                if (getImageGenProvider() === 'stepfun') {
+                    quotaValue.value = 0;
+                    quotaAvailable.value = false;
+                    return;
+                }
                 const imageGenToken = settings.imageGenKey.trim();
                 if (!imageGenToken) {
                     quotaValue.value = 0;
@@ -573,6 +580,7 @@ createApp({
             fontFamilyVersion: 4,
             fontSize: window.innerWidth > 768 ? 16 : 14,
             imageGenKey: '',
+            imageGenProvider: 'auto',
             imageStyle: 'vertical',
             customImageArtists: '',
             imageSize: '竖图',
@@ -811,7 +819,7 @@ createApp({
         }, { deep: true });
 
         // Watch image gen and model settings for sync
-        watch(() => [settings.imageGenKey, settings.imageStyle, settings.customImageArtists, settings.imageGenCount, settings.qualityModel, settings.balancedModel, settings.fastModel, settings.uiTemplateModel, settings.fontFamily, settings.fontFamilyVersion], () => {
+        watch(() => [settings.imageGenKey, settings.imageGenProvider, settings.imageStyle, settings.customImageArtists, settings.imageGenCount, settings.qualityModel, settings.balancedModel, settings.fastModel, settings.uiTemplateModel, settings.fontFamily, settings.fontFamilyVersion], () => {
             syncSettingsToGenerator();
         });
 
@@ -904,6 +912,11 @@ createApp({
             { value: '4K竖图', label: '4K竖图(-25)' },
             { value: '4K横图', label: '4K横图(-25)' },
             { value: '4K方图', label: '4K方图(-25)' }
+        ];
+        const imageGenProviderOptions = [
+            { value: 'auto', label: 'STA1N 优先 / StepFun 兜底' },
+            { value: 'sta1n', label: '仅 STA1N / NAI' },
+            { value: 'stepfun', label: '仅 StepFun Step Plan' }
         ];
         const imageGenCountOptions = [1, 2, 3, 4, 5, 6].map(count => ({
             value: count,
@@ -2421,6 +2434,18 @@ createApp({
             }
         });
 
+        watch(() => settings.imageGenProvider, () => {
+            enforceSpecialRules();
+            renderMarkdownCache.clear();
+            scheduleStepFunImageScan();
+            if (isAutoImageGenEnabled.value) {
+                const provider = getImageGenProvider() === 'auto' ? 'STA1N 优先 / StepFun 兜底' : (getImageGenProvider() === 'stepfun' ? 'StepFun Step Plan' : 'STA1N / NAI');
+                showToast('生图服务已切换：' + provider, 'success');
+            }
+            checkImageGenStatus();
+            fetchQuota();
+        });
+
         watch(() => settings.imageGenCount, () => {
             enforceSpecialRules();
         });
@@ -3581,6 +3606,70 @@ ${content}
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
         };
+
+        const getImageGenProvider = () => ['auto', 'sta1n', 'stepfun'].includes(settings.imageGenProvider)
+            ? settings.imageGenProvider
+            : 'auto';
+
+        const getStepFunImageApiKey = () => {
+            const currentApiUrl = normalizeApiProviderUrl(settings.apiUrl);
+            const usesStepFunProvider = settings.apiProviderId === 'stepfun' || currentApiUrl.includes('/step_plan/v1');
+            if (usesStepFunProvider && settings.apiKey) return String(settings.apiKey).trim();
+            if (getImageGenProvider() === 'stepfun' && settings.imageGenKey) return String(settings.imageGenKey).trim();
+            return '';
+        };
+
+        const getStepFunImageBaseUrl = () => {
+            const currentApiUrl = String(settings.apiUrl || '').replace(/\/+$/, '');
+            if ((settings.apiProviderId === 'stepfun' || currentApiUrl.includes('/step_plan/v1')) && currentApiUrl) {
+                return currentApiUrl;
+            }
+            return STEPFUN_STEP_PLAN_BASE_URL;
+        };
+
+        const getStepFunImageSize = () => {
+            const size = String(settings.imageSize || '');
+            if (size.includes('横图')) return '768x1360';
+            if (size.includes('竖图')) return '1360x768';
+            return '1024x1024';
+        };
+
+        const buildStepFunImagePrompt = (prompt) => {
+            const text = String(prompt || '').replace(/\s+/g, ' ').trim();
+            return text.slice(0, 512);
+        };
+
+        const escapeHtmlAttr = (value) => String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+
+        const buildStepFunImagePlaceholder = (prompt, provider = getImageGenProvider()) => {
+            const encodedPrompt = encodeURIComponent(buildStepFunImagePrompt(prompt));
+            const size = getStepFunImageSize();
+            const providerLabel = provider === 'auto' ? 'StepFun 兜底' : 'StepFun 生图';
+            return `<div class="rph-stepfun-image-card" data-rph-image-gen="${provider}" data-rph-stepfun-prompt="${escapeHtmlAttr(encodedPrompt)}" data-rph-stepfun-size="${escapeHtmlAttr(size)}" style="width:auto;max-width:100%;min-width:220px;min-height:120px;box-sizing:border-box;padding:12px;border:1px solid rgba(20,184,166,0.22);background:rgba(240,253,250,0.72);border-radius:12px;display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#0f766e;box-shadow:0 4px 14px rgba(148,163,184,0.08);"><div class="rph-stepfun-image-status" style="font-size:13px;font-weight:700;">${providerLabel}准备中...</div><div style="font-size:11px;color:#64748b;">${escapeHtmlAttr(size)} · ${escapeHtmlAttr(STEPFUN_IMAGE_MODEL)}</div></div>`;
+        };
+
+        const buildSta1nImageMarkupFromTemplate = (prompt, replacementTemplate) => {
+            return String(replacementTemplate || '').replace(/\$1/g, encodeURIComponent(String(prompt || '').trim()));
+        };
+
+        const buildImageGenMarkup = (prompt, replacementTemplate) => {
+            const provider = getImageGenProvider();
+            if (provider === 'stepfun') return buildStepFunImagePlaceholder(prompt, provider);
+
+            const sta1nMarkup = buildSta1nImageMarkupFromTemplate(prompt, replacementTemplate);
+            if (provider === 'sta1n') return sta1nMarkup;
+
+            const src = sta1nMarkup.match(/<img\b[^>]*\bsrc="([^"]+)"/i)?.[1] || '';
+            const fallback = buildStepFunImagePlaceholder(prompt, 'auto');
+            if (!src) return fallback;
+
+            return `<div class="rph-auto-image-card" data-rph-image-gen="auto" data-rph-stepfun-prompt="${escapeHtmlAttr(encodeURIComponent(buildStepFunImagePrompt(prompt)))}" data-rph-stepfun-size="${escapeHtmlAttr(getStepFunImageSize())}" style="width:auto;max-width:100%;display:inline-flex;flex-direction:column;align-items:center;gap:8px;"><img src="${escapeHtmlAttr(src)}" data-rph-sta1n-primary="true" alt="生成图片" style="max-width:100%;height:auto;width:auto;display:block;object-fit:contain;border-radius:9px;transition:transform 0.3s ease;"><div class="rph-stepfun-image-status" style="display:none;font-size:12px;font-weight:700;color:#0f766e;background:rgba(240,253,250,0.82);border:1px solid rgba(20,184,166,0.2);border-radius:999px;padding:4px 10px;">STA1N 加载失败，准备切换 StepFun...</div></div>`;
+        };
+
         const processRegex = (text, options = {}) => {
             if (!text) return '';
             // options: { isDisplay, isPrompt, role, depth }
@@ -3620,6 +3709,11 @@ ${content}
                     const replacement = script.hasOwnProperty('replacement')
                         ? script.replacement
                         : (script.replaceString || '');
+                    const isImageGenScript = (script.name || script.scriptName) === 'NAI画图正则';
+                    const applyScriptReplacement = (source) => {
+                        if (!isImageGenScript || !isDisplay) return source.replace(re, replacement);
+                        return source.replace(re, (...args) => buildImageGenMarkup(args[1] || '', replacement));
+                    };
 
                     if (!regexPattern) return;
 
@@ -3669,11 +3763,11 @@ ${content}
                                 return part; // 保持原样
                             }
                             // 对普通文本应用替换
-                            return part.replace(re, replacement);
+                            return applyScriptReplacement(part);
                         }).join('');
                     } else {
                         // 如果正则明确包含 <, > 或 ```，说明用户意图直接操作 HTML 或 Markdown 代码块，因此跳过保护直接替换
-                        result = result.replace(re, replacement);
+                        result = applyScriptReplacement(result);
                     }
                     // --- Protection Logic End ---
 
@@ -3688,10 +3782,173 @@ ${content}
 
         const renderMarkdownCache = new Map();
         const htmlFrameDetectionCache = new Map();
-        watch(() => [settings.disableImages, regexScripts.value], () => {
+        watch(() => [settings.disableImages, settings.imageGenProvider, settings.imageSize, regexScripts.value], () => {
             renderMarkdownCache.clear();
             htmlFrameDetectionCache.clear();
         }, { deep: true });
+
+        let stepFunImageScanScheduled = false;
+        const stepFunImageResultCache = new Map();
+        const getStepFunImageCacheKey = (prompt, size) => `${size || getStepFunImageSize()}::${prompt || ''}`;
+        const cacheStepFunImageResult = (cacheKey, src) => {
+            if (!cacheKey || !src) return;
+            stepFunImageResultCache.set(cacheKey, src);
+            if (stepFunImageResultCache.size > 50) stepFunImageResultCache.delete(stepFunImageResultCache.keys().next().value);
+        };
+        const getStepFunImageErrorMessage = (error) => {
+            const message = error?.message || String(error || '');
+            if (!message) return 'StepFun 生图失败';
+            return message.length > 120 ? `${message.slice(0, 120)}...` : message;
+        };
+
+        const setStepFunImageStatus = (node, text, state = 'pending') => {
+            if (!node) return;
+            node.dataset.rphImageState = state;
+            const status = node.querySelector('.rph-stepfun-image-status');
+            if (status) {
+                status.style.display = '';
+                status.textContent = text;
+            }
+        };
+
+        const ensureStepFunImageElement = (node) => {
+            let img = node.querySelector('img[data-rph-stepfun-result="true"]');
+            if (img) return img;
+            img = document.createElement('img');
+            img.dataset.rphStepfunResult = 'true';
+            img.alt = 'StepFun 生成图片';
+            img.style.maxWidth = '100%';
+            img.style.height = 'auto';
+            img.style.width = 'auto';
+            img.style.display = 'block';
+            img.style.objectFit = 'contain';
+            img.style.borderRadius = '9px';
+            img.style.boxShadow = '0 4px 14px rgba(148,163,184,0.08)';
+            node.appendChild(img);
+            return img;
+        };
+
+        const generateStepFunImageForNode = async (node) => {
+            if (!node || node.dataset.rphImageState === 'stepfun-loading' || node.dataset.rphImageState === 'done') return;
+            const apiKey = getStepFunImageApiKey();
+            if (!apiKey) {
+                setStepFunImageStatus(node, '未配置 StepFun API Key，无法兜底生图', 'error');
+                return;
+            }
+
+            const prompt = decodeURIComponent(node.dataset.rphStepfunPrompt || '').trim();
+            if (!prompt) {
+                setStepFunImageStatus(node, '缺少生图提示词', 'error');
+                return;
+            }
+
+            const size = node.dataset.rphStepfunSize || getStepFunImageSize();
+            const cacheKey = getStepFunImageCacheKey(prompt, size);
+            const cachedSrc = stepFunImageResultCache.get(cacheKey);
+            if (cachedSrc) {
+                const primary = node.querySelector('img[data-rph-sta1n-primary="true"]');
+                if (primary) primary.style.display = 'none';
+                const img = ensureStepFunImageElement(node);
+                img.src = cachedSrc;
+                setStepFunImageStatus(node, 'StepFun 生图完成', 'done');
+                const status = node.querySelector('.rph-stepfun-image-status');
+                if (status) status.style.display = 'none';
+                return;
+            }
+
+            setStepFunImageStatus(node, 'StepFun 生图中...', 'stepfun-loading');
+            try {
+                const response = await fetch(`${getStepFunImageBaseUrl()}/images/generations`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: STEPFUN_IMAGE_MODEL,
+                        prompt,
+                        size,
+                        n: 1,
+                        response_format: 'b64_json',
+                        cfg_scale: 1.0,
+                        steps: 8,
+                        text_mode: true
+                    })
+                });
+
+                const data = await response.json().catch(() => null);
+                const apiError = extractApiErrorMessage(data, response.status);
+                if (!response.ok || apiError) throw new Error(apiError || `StepFun Image API Error: ${response.status}`);
+
+                const imageData = data?.data?.[0] || {};
+                const src = imageData.b64_json
+                    ? `data:image/png;base64,${imageData.b64_json}`
+                    : imageData.url;
+                if (!src) throw new Error('StepFun 未返回图片数据');
+                if (imageData.finish_reason && imageData.finish_reason !== 'success') {
+                    throw new Error(`StepFun 生图未完成: ${imageData.finish_reason}`);
+                }
+                cacheStepFunImageResult(cacheKey, src);
+
+                const primary = node.querySelector('img[data-rph-sta1n-primary="true"]');
+                if (primary) primary.style.display = 'none';
+                const img = ensureStepFunImageElement(node);
+                img.src = src;
+                setStepFunImageStatus(node, 'StepFun 生图完成', 'done');
+                const status = node.querySelector('.rph-stepfun-image-status');
+                if (status) status.style.display = 'none';
+            } catch (error) {
+                console.warn('StepFun image generation failed:', error);
+                setStepFunImageStatus(node, getStepFunImageErrorMessage(error), 'error');
+            }
+        };
+
+        const scanStepFunImagePlaceholders = () => {
+            const root = chatContainer.value || document;
+            const nodes = root.querySelectorAll('[data-rph-image-gen]');
+            nodes.forEach(node => {
+                if (!node || node.dataset.rphImageState === 'done' || node.dataset.rphImageState === 'error' || node.dataset.rphImageState === 'stepfun-loading') return;
+                const provider = node.dataset.rphImageGen;
+                if (provider === 'stepfun') {
+                    generateStepFunImageForNode(node);
+                    return;
+                }
+
+                if (provider === 'auto') {
+                    const primary = node.querySelector('img[data-rph-sta1n-primary="true"]');
+                    if (!primary) {
+                        generateStepFunImageForNode(node);
+                        return;
+                    }
+                    if (node.dataset.rphImageState === 'primary') return;
+                    node.dataset.rphImageState = 'primary';
+                    primary.addEventListener('error', () => {
+                        setStepFunImageStatus(node, 'STA1N 加载失败，正在切换 StepFun...', 'stepfun-fallback');
+                        generateStepFunImageForNode(node);
+                    }, { once: true });
+                    if (primary.complete && primary.naturalWidth === 0) {
+                        setStepFunImageStatus(node, 'STA1N 加载失败，正在切换 StepFun...', 'stepfun-fallback');
+                        generateStepFunImageForNode(node);
+                    }
+                }
+            });
+        };
+
+        const scheduleStepFunImageScan = () => {
+            if (stepFunImageScanScheduled) return;
+            stepFunImageScanScheduled = true;
+            nextTick(() => {
+                stepFunImageScanScheduled = false;
+                scanStepFunImagePlaceholders();
+            });
+        };
+
+        const cacheRenderedMarkdown = (cacheKey, html) => {
+            renderMarkdownCache.set(cacheKey, html);
+            if (renderMarkdownCache.size > 2000) renderMarkdownCache.delete(renderMarkdownCache.keys().next().value);
+            if (String(html || '').includes('data-rph-image-gen')) scheduleStepFunImageScan();
+            return html;
+        };
 
         const contentUsesHtmlFrame = (text, role = 'assistant', skipRegex = false) => {
             if (!text) return false;
@@ -3879,7 +4136,11 @@ ${content}
         const renderMarkdown = (text, role = 'assistant', skipRegex = false) => {
             if (!text) return '';
             const cacheKey = `${role}_${skipRegex}_${text}`;
-            if (renderMarkdownCache.has(cacheKey)) return renderMarkdownCache.get(cacheKey);
+            if (renderMarkdownCache.has(cacheKey)) {
+                const cachedHtml = renderMarkdownCache.get(cacheKey);
+                if (String(cachedHtml || '').includes('data-rph-image-gen')) scheduleStepFunImageScan();
+                return cachedHtml;
+            }
 
             let processed = text;
 
@@ -3950,9 +4211,7 @@ ${content}
                     resultHtml += DOMPurify.sanitize(marked.parse(postText), cleanConfig);
                 }
 
-                renderMarkdownCache.set(cacheKey, resultHtml);
-                if (renderMarkdownCache.size > 2000) renderMarkdownCache.delete(renderMarkdownCache.keys().next().value);
-                return resultHtml;
+                return cacheRenderedMarkdown(cacheKey, resultHtml);
             }
 
             const lowerTrimmed = trimmed.toLowerCase();
@@ -3963,9 +4222,7 @@ ${content}
             if (startsWithBlockHtml && !trimmed.includes('```')) {
                 // Directly sanitize and return, skipping Markdown parsing
                 const result = DOMPurify.sanitize(processed, cleanConfig);
-                renderMarkdownCache.set(cacheKey, result);
-                if (renderMarkdownCache.size > 2000) renderMarkdownCache.delete(renderMarkdownCache.keys().next().value);
-                return result;
+                return cacheRenderedMarkdown(cacheKey, result);
             }
 
             // For mixed content (Text + HTML widgets like HUDs/Status Bars),
@@ -4058,17 +4315,13 @@ ${content}
 
                 if (modified) {
                     const result = doc.body.innerHTML;
-                    renderMarkdownCache.set(cacheKey, result);
-                    if (renderMarkdownCache.size > 2000) renderMarkdownCache.delete(renderMarkdownCache.keys().next().value);
-                    return result;
+                    return cacheRenderedMarkdown(cacheKey, result);
                 }
             } catch (e) {
                 console.error('Error rendering HTML preview:', e);
             }
 
-            renderMarkdownCache.set(cacheKey, html);
-            if (renderMarkdownCache.size > 2000) renderMarkdownCache.delete(renderMarkdownCache.keys().next().value);
-            return html;
+            return cacheRenderedMarkdown(cacheKey, html);
         };
 
         // API & Models
@@ -4166,13 +4419,23 @@ ${content}
                 const id = setTimeout(() => controller.abort(), 10000);
                 const startTime = performance.now();
 
-                const baseUrl = IMAGE_GEN_BASE_URL;
+                if (getImageGenProvider() === 'stepfun') {
+                    const apiKey = getStepFunImageApiKey();
+                    if (!apiKey) throw new Error('Missing StepFun API key');
+                    const response = await fetch(`${getStepFunImageBaseUrl()}/models`, {
+                        headers: { 'Authorization': `Bearer ${apiKey}` },
+                        signal: controller.signal
+                    });
+                    if (!response.ok) throw new Error(`StepFun status check failed: ${response.status}`);
+                } else {
+                    const baseUrl = IMAGE_GEN_BASE_URL;
 
-                await fetch(baseUrl, {
-                    method: 'HEAD',
-                    mode: 'no-cors',
-                    signal: controller.signal
-                });
+                    await fetch(baseUrl, {
+                        method: 'HEAD',
+                        mode: 'no-cors',
+                        signal: controller.signal
+                    });
+                }
                 clearTimeout(id);
                 const endTime = performance.now();
 
@@ -10889,7 +11152,7 @@ image###生成的提示词###
             showUpdateModal, updateCountdown, latestUpdate, closeUpdateModal, isUpdateScrolledToBottom, checkUpdateScroll, // Update Modal
             showConfirmModal, confirmMessage, modelMode, showNoMemoryNeededModal, // Export for template
             isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, activeToolInlineStatusText, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationToolCallId, activeToolContinuationHasResponse, activeNativeReasoning, userInput, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, availableModels, filteredModels, filteredCharacters,
-            user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOption, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, imageStyleOptions, imageSizeOptions, imageGenCountOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
+            user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOption, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, imageStyleOptions, imageSizeOptions, imageGenProviderOptions, imageGenCountOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
             activeTools, activeToolAggressivenessOptions: ACTIVE_TOOL_AGGRESSIVENESS_OPTIONS, getActiveToolAggressivenessLabel, editingActiveTool, normalizeActiveTools, isWebActiveTool, isWorldInfoActiveTool, getWorldInfoAccessMode, getActiveToolDisplayDescription, canConfigureActiveToolResultCount, getActiveToolResultCountMin, getActiveToolResultCountMax,
             getToolCallModeText, hasThinkingOrTools, isMessageThinkingOrRunning, isThinkingSummaryOpen, toggleThinkingSummary, markThinkingSummaryDetailOpened, getTimelineSteps,
             activeRegexCount, activeWorldInfoCount, activeUiTemplateCount, chatRoundStats, totalContextLength,

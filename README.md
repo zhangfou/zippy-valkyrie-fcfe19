@@ -46,6 +46,16 @@ Roleplay Hub 致力于提供流畅、私密且功能强大的本地化AI Rolepla
 
 说明：StepFunMCP 是 Python MCP server，浏览器无法直接运行 MCP stdio 服务。本项目的兼容方式是直接调用 StepFun HTTP API，因此适用于聊天模型接入；StepFunMCP 的本地文件输出类工具能力仍需要在支持 MCP 的客户端中使用。
 
+### 4. 自动生图兜底
+
+自动生图支持三种服务策略：
+
+1. `STA1N 优先 / StepFun 兜底`：默认策略。先按原有 `nai.sta1n.cn` 图片 URL 加载；如果图片加载失败，并且当前 API 提供商为“阶跃星辰 Step Plan”且已填写 API Key，则自动调用 StepFun `step-image-edit-2` 生成图片。
+2. `仅 STA1N / NAI`：保持原有生图方式，只使用“自动生图密钥”中的 STA1N Token。
+3. `仅 StepFun Step Plan`：直接调用 `https://api.stepfun.com/step_plan/v1/images/generations`，模型为 `step-image-edit-2`。如果上方 API 提供商已选“阶跃星辰 Step Plan”，会复用上方 API Key；否则可在“自动生图密钥”中填入 StepFun API Key。
+
+StepFun 生图按官方 Step Plan 计费规则消耗额度；应用不会把 API Key 写入仓库。
+
 ---
 
 ## 目录结构 (Directory Structure)
